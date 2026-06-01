@@ -32,3 +32,9 @@ npm run build
 - `src/components/InteractiveFigures.tsx` contains reusable interactive diagrams.
 
 The app uses `HashRouter` so the static build can be deployed later to GitHub Pages, Netlify, or Vercel without needing server-side route rewrites.
+
+## GitHub Pages
+
+The repository includes a GitHub Actions workflow that runs CI on pull requests and pushes to `main`. On successful pushes to `main`, it builds the Vite app and deploys `dist/` to GitHub Pages.
+
+In the GitHub repository settings, set **Pages** -> **Build and deployment** -> **Source** to **GitHub Actions**.
