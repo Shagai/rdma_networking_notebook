@@ -1,0 +1,322 @@
+import ArticleLayout from '../components/ArticleLayout'
+import { Callout, Sidenote, Term } from '../components/MdxComponents'
+import { LatencyBudgetFigure, ProtocolPathFigure, QueuePairFigure } from '../components/InteractiveFigures'
+import { ObjectLifecycleFigure, WorkRequestFigure } from '../components/DeepArticleFigures'
+
+<ArticleLayout
+  kicker="Foundations"
+  title="RDMA Fundamentals"
+  subtitle="A deeper first-principles guide to RDMA object lifetimes, memory registration, queue pairs, work requests, completions, and measurement habits."
+  updated="2026-06-01"
+  readingTime="32 min"
+  toc={[
+    { href: '#mental-model', label: 'Mental model' },
+    { href: '#why-rdma-exists', label: 'Why RDMA exists' },
+    { href: '#control-data-path', label: 'Control vs data path' },
+    { href: '#object-lifetime', label: 'Object lifetime' },
+    { href: '#memory-registration', label: 'Memory registration' },
+    { href: '#core-objects', label: 'Core objects' },
+    { href: '#work-requests', label: 'Work requests' },
+    { href: '#queue-pairs', label: 'Queue pairs' },
+    { href: '#ordering-errors', label: 'Ordering and errors' },
+    { href: '#transports', label: 'Transport lens' },
+    { href: '#what-to-measure', label: 'What to measure' },
+    { href: '#lab-path', label: 'Lab path' },
+  ]}
+>
+
+<h2 id="mental-model">Mental model</h2>
+
+RDMA is easiest to learn when you stop thinking of it as "faster sockets" and start thinking of it as a negotiated memory access machine. A normal socket program asks the kernel to copy bytes between application buffers and kernel networking buffers. An RDMA program sets up trusted memory windows and queues, then asks the RNIC to move bytes directly between registered memory regions.
+
+<div className="learning-goals">
+  <div>
+    <strong>What stays in software</strong>
+    <p>Discovery, permission setup, buffer ownership, connection management, error handling, and application-level protocol design.</p>
+  </div>
+  <div>
+    <strong>What moves to the RNIC</strong>
+    <p>Packetization, transport progress, DMA into registered buffers, completion production, and often retransmission or ordering work.</p>
+  </div>
+  <div>
+    <strong>What you must design</strong>
+    <p>Who owns each buffer, when a peer may access it, how completions are interpreted, and how metadata is exchanged safely.</p>
+  </div>
+</div>
+
+The core idea is not just "zero copy." Zero-copy data movement is the result of a larger contract: memory is registered, access flags are explicit, queue pairs have state, and both sides agree on addresses, keys, and transport parameters before the fast path begins.
+
+<Sidenote>
+The phrase "zero copy" can be misleading. RDMA removes common CPU-mediated copies on the data path, but data still moves over PCIe, through NIC buffers, and across the network.
+</Sidenote>
+
+<Callout title="The first useful sentence">
+RDMA is a queue-based API for letting an RNIC perform authorized DMA operations against memory that an application has registered and coordinated with a peer.
+</Callout>
+
+<h2 id="why-rdma-exists">Why RDMA exists</h2>
+
+RDMA exists because some workloads spend too much time moving bytes through software layers that do not add value for every message. A storage target, MPI rank, parameter server, GPU communication runtime, or distributed database often knows exactly which buffer should receive data. When the buffer identity is already known, repeated kernel copies and wakeups become overhead.
+
+The practical motivations usually cluster into four groups:
+
+1. Lower latency, especially when the common path avoids kernel scheduling and extra copies.
+2. Higher throughput per CPU core, because the RNIC handles more of the packet and DMA work.
+3. More predictable tail behavior, because fewer software queues and copies are in the hot path.
+4. Better fit for storage and GPU pipelines, where data placement matters as much as data arrival.
+
+<LatencyBudgetFigure />
+
+The figure is intentionally a teaching model, not a benchmark. Real latency depends on CPU frequency, PCIe topology, interrupt moderation, polling strategy, NIC generation, switch path, MTU, message size, cache state, memory type, and transport. The useful lesson is that RDMA shifts work out of repeated per-message software copies and into setup plus queue-driven device progress.
+
+<blockquote>
+The price of a small data path is a larger setup path. RDMA programming feels verbose because it moves many implicit socket assumptions into explicit objects.
+</blockquote>
+
+<h2 id="control-data-path">Control path versus data path</h2>
+
+A reliable RDMA program has two different personalities. The control path is careful, stateful, and metadata-heavy. The data path is repetitive, compact, and queue-driven.
+
+The <Term>control path</Term> discovers devices, creates protection domains, registers memory, creates queues, exchanges endpoint metadata, transitions queue pairs, and decides which keys a peer may use. RDMA CM, out-of-band TCP sockets, configuration files, or orchestration systems can all participate in this path.
+
+The <Term>data path</Term> posts receive buffers, posts send/read/write/atomic work requests, rings doorbells, polls completion queues, and recycles buffers. Once the connection is ready, the data path should avoid surprising allocation, blocking calls, or large coordination steps.
+
+<div className="deep-grid">
+  <div>
+    <strong>Control path questions</strong>
+    <p>Which device and port? Which GID or LID? What MTU? Which memory region? Which rkey may be shared? Which queue pair state is valid now?</p>
+  </div>
+  <div>
+    <strong>Data path questions</strong>
+    <p>Which work request id completed? Was the status successful? Can the buffer be reused? Is the peer expecting a signal or application-level notification?</p>
+  </div>
+</div>
+
+Most confusing RDMA bugs happen when these paths are mentally mixed. For example, an RDMA write can place bytes into remote memory without consuming a remote receive. That does not mean the remote application magically knows the bytes are meaningful. Your protocol still needs a notification mechanism: a send message, a polled flag, a completion on another queue, or a higher-level library convention.
+
+<ProtocolPathFigure />
+
+<h2 id="object-lifetime">Object lifetime</h2>
+
+RDMA objects have dependencies. Destroying or reusing them in the wrong order can create intermittent failures that look like transport problems but are actually ownership problems. A simplified lifetime is:
+
+<ObjectLifecycleFigure />
+
+The order matters because the RNIC can still be working after the CPU has posted a request. A buffer is not reusable just because the function that posted the request returned. A memory region is not safe to deregister while outstanding work can still reference its lkey or rkey. A completion queue cannot be destroyed while queue pairs still report into it.
+
+The lifetime discipline is:
+
+1. Create long-lived objects first: context, protection domain, completion queues.
+2. Register memory before posting work that names the buffer.
+3. Bring queue pairs to the correct state before sending traffic.
+4. Keep receive queues stocked before expecting incoming sends.
+5. Poll completions and use work request ids to recover application ownership.
+6. Drain or fail outstanding work before teardown.
+
+<Callout title="Ownership rule">
+Posting a work request transfers temporary ownership of the referenced buffer to the RDMA subsystem. Completion returns ownership to your application, unless your protocol defines a stricter rule.
+</Callout>
+
+<h2 id="memory-registration">Memory registration</h2>
+
+Memory registration is the moment an ordinary application buffer becomes an RDMA-capable memory region. The verbs provider records the virtual address range, pins or maps the underlying pages as needed, programs translation metadata for the RNIC, and returns keys used to authorize access.
+
+```c
+struct ibv_mr *mr = ibv_reg_mr(
+    protection_domain,
+    buffer,
+    buffer_length,
+    IBV_ACCESS_LOCAL_WRITE |
+    IBV_ACCESS_REMOTE_READ |
+    IBV_ACCESS_REMOTE_WRITE
+);
+```
+
+The returned memory region has two important key values:
+
+| Key | Used by | Meaning |
+| --- | --- | --- |
+| `lkey` | Local work requests | Authorizes the local RNIC to access the local buffer for a posted operation. |
+| `rkey` | Remote peers | Authorizes a peer to access this memory region for one-sided operations when paired with the remote address. |
+
+Access flags are part of the security and correctness story. If a buffer only needs to be a local send source, it does not need remote write permission. If a peer should only read a region, remote write access is unnecessary. A good RDMA program treats rkeys like capabilities: share them deliberately, scope them tightly, and invalidate or stop using them when the protocol phase ends.
+
+<Sidenote>
+Registration can be expensive. High-performance systems usually pre-register pools, use memory caches, or rely on frameworks that hide registration reuse behind an allocator.
+</Sidenote>
+
+Common registration mistakes:
+
+1. Registering and deregistering for every small message.
+2. Sharing an rkey without a clear lifetime or protocol phase.
+3. Reusing a buffer before its completion has arrived.
+4. Forgetting that remote write visibility to the CPU can still require application-level synchronization.
+5. Assuming GPU memory, huge pages, and ordinary host memory all behave the same.
+
+<h2 id="core-objects">Core objects</h2>
+
+The verbs object graph is compact, but every object answers a specific question:
+
+| Object | Purpose | Question it answers |
+| --- | --- | --- |
+| Device context | Open handle to an RDMA device | Which adapter am I using? |
+| Port attributes | Link and addressing properties | Which physical or logical port carries traffic? |
+| Protection domain | Isolation boundary | Which queues and memory regions are allowed to work together? |
+| Memory region | Registered memory plus keys | What memory may the RNIC touch? |
+| Completion queue | Finished-work reporting | Where do completions appear? |
+| Queue pair | Send and receive queues | Where do I post work? |
+| Address handle | UD path information | How does unreliable datagram traffic reach a peer? |
+
+The protection domain is easy to underestimate. It is not a data structure you use often after creation, but it ties memory regions and queue pairs into a common trust boundary. A queue pair cannot use an arbitrary lkey from some unrelated protection domain.
+
+The completion queue is also more subtle than it first appears. A completion is not the same as a high-level application event. It is a low-level report that a work request reached a completion condition or failed. Your program maps `wr_id` values back to buffers, RPCs, storage commands, or protocol state.
+
+```c
+struct ibv_sge sge = {
+    .addr = (uintptr_t)buffer,
+    .length = buffer_length,
+    .lkey = mr->lkey,
+};
+
+struct ibv_send_wr wr = {
+    .wr_id = request_id,
+    .sg_list = &sge,
+    .num_sge = 1,
+    .opcode = IBV_WR_RDMA_WRITE,
+    .send_flags = IBV_SEND_SIGNALED,
+    .wr.rdma.remote_addr = remote_addr,
+    .wr.rdma.rkey = remote_rkey,
+};
+```
+
+The structure shows why RDMA examples feel metadata-heavy. A work request names local memory through an SGE and lkey, names the operation through an opcode, and for one-sided operations names remote memory through address and rkey.
+
+<h2 id="work-requests">Work requests</h2>
+
+Work requests are the commands your application gives to the queue pair. The RNIC consumes them asynchronously. The four operations you should learn first are send, RDMA write, RDMA read, and atomics.
+
+<WorkRequestFigure />
+
+The most important distinction is two-sided versus one-sided:
+
+1. Two-sided send/receive consumes work on both peers. The receiver must post receive buffers before incoming sends arrive.
+2. One-sided RDMA write/read consumes a send-side work request on the initiator but does not consume a receive work request on the remote side.
+3. Atomics are one-sided operations for small remote updates and have stricter hardware and alignment constraints.
+
+This is where RDMA changes protocol design. With sockets, receiving bytes is usually the event. With one-sided RDMA, memory can change without a matching receive event. Many systems combine a bulk one-sided operation with a small two-sided notification. For example, write a payload into a remote buffer, then send a tiny message that says which slot is ready.
+
+Signaling is another key design choice. If every work request is signaled, the completion queue gives direct feedback for each operation but can become a bottleneck. If many work requests are unsignaled, overhead drops but the application must occasionally post signaled requests and manage outstanding work carefully. This is a common performance lever and a common source of queue overflow bugs.
+
+<Callout title="Completion does not mean what you hope by default">
+Always ask: completed where, visible to whom, and sufficient for what next action? The answer depends on opcode, transport, flags, and your application protocol.
+</Callout>
+
+<h2 id="queue-pairs">Queue pairs</h2>
+
+Queue pairs are the center of the verbs programming model. A QP has a send queue and a receive queue. You post work requests to those queues, and completion queues report when selected work completes.
+
+<QueuePairFigure />
+
+Reliable-connected examples usually transition a QP through RESET, INIT, RTR, and RTS:
+
+| State | Meaning | Typical metadata |
+| --- | --- | --- |
+| RESET | Exists but cannot communicate | Basic object allocation only |
+| INIT | Bound to local port and access behavior | Port, pkey index, access flags |
+| RTR | Ready to receive from a known peer | Remote QPN, path MTU, destination addressing, receive PSN |
+| RTS | Ready to send to that peer | Send PSN, retry count, timeout, outstanding RDMA read limits |
+
+The QP state machine forces both sides to agree on transport details before data moves. In a manual setup, applications exchange QP number, packet sequence number, LID or GID, MTU, rkey, and remote virtual address through some side channel. RDMA CM can automate much of the address and route resolution, but the underlying concepts are still the same.
+
+There are several QP transport types. Reliable connected (RC) is the common starting point because it provides ordered reliable communication between two endpoints and supports send, write, read, and atomics. Unreliable datagram (UD) is message-oriented and useful for discovery or scalable messaging patterns, but it has different addressing and reliability semantics. Advanced transports exist, but RC is the right first mental anchor.
+
+<Sidenote>
+The "connected" in RC is a queue-pair relationship, not a socket file descriptor. You still post work and poll completions rather than read and write a stream.
+</Sidenote>
+
+<h2 id="ordering-errors">Ordering and errors</h2>
+
+RDMA transports can provide strong ordering within a queue pair, but that does not remove the need for protocol design. Ordering is scoped. It is not automatically global across QPs, completion queues, CPU cores, devices, and remote application threads.
+
+Think in layers:
+
+1. Work queue order describes how the RNIC observes posted operations on one queue.
+2. Transport order describes what the remote side can observe for a specific connection or operation class.
+3. Memory visibility describes when data is safe for the remote CPU or device to consume.
+4. Application order describes the higher-level rule that says "this object is now valid."
+
+Errors are also asynchronous. Posting can succeed, but the work request can later complete with an error. The remote side can disappear after setup. A retry limit can be exceeded. A protection error can occur because an rkey, access flag, address, or length is wrong. A receive-not-ready problem can appear when sends arrive before receive buffers exist.
+
+Useful debugging habits:
+
+1. Log QP state transitions and the exact attributes used for each transition.
+2. Keep the `wr_id` meaningful so completions identify the application object.
+3. Print completion status, vendor error, opcode, byte length, and QP number when available.
+4. Track posted receives and outstanding sends as counters.
+5. Treat the first error completion as the primary clue; later failures may be consequences.
+
+<h2 id="transports">Transport lens</h2>
+
+The verbs programming model can look similar across InfiniBand, RoCEv2, and RXE, but the operational questions differ.
+
+InfiniBand is a native RDMA fabric. You learn about subnet managers, LIDs, partitions, service levels, and path records. RoCEv2 carries RDMA over UDP/IP on Ethernet, so GID index selection, VLANs, routing, congestion control, PFC, and ECN become part of the system. RXE emulates RDMA in software over ordinary Ethernet, which is excellent for API learning and functional tests but not performance learning.
+
+<ProtocolPathFigure />
+
+For this notebook, the practical rule is:
+
+1. Use RXE to learn verbs object lifetimes and write reproducible examples.
+2. Use InfiniBand to learn native fabric behavior when the hardware is available.
+3. Use RoCEv2 to learn production Ethernet RDMA operations and misconfiguration patterns.
+4. Use UCX, libfabric, NCCL, and SPDK later to study how higher-level systems choose and hide these details.
+
+<h2 id="what-to-measure">What to measure</h2>
+
+The first benchmark habit is to write down the path before reading the number. A latency or bandwidth result is only useful when the device, transport, message size, queue depth, inline threshold, GID index, MTU, CPU placement, memory type, and command line are known.
+
+Good early measurements:
+
+1. `ib_send_lat` for two-sided send latency.
+2. `ib_write_bw` for one-sided write bandwidth.
+3. `ib_read_bw` for one-sided read behavior.
+4. Message size sweeps from tiny control messages to large buffers.
+5. Queue depth sweeps to separate latency-oriented and throughput-oriented behavior.
+6. RXE functional tests to validate code paths before hardware testing.
+
+What to record next to every result:
+
+| Field | Why it matters |
+| --- | --- |
+| Device and firmware | NIC behavior and capabilities change by generation. |
+| Link layer and transport | InfiniBand, RoCEv2, and RXE do not imply the same path. |
+| MTU and GID index | Common source of confusing RoCE results. |
+| CPU and NUMA placement | Polling from the wrong socket can dominate latency. |
+| Memory type | Host memory, huge pages, and GPU memory have different paths. |
+| Signaling and inline settings | These alter completion pressure and small-message behavior. |
+| Raw command lines | Benchmarks without commands are hard to reproduce. |
+
+<Callout title="Benchmark caution">
+perftest numbers are evidence, not a complete explanation. Keep topology, command lines, environment variables, and device counters next to every chart.
+</Callout>
+
+<h2 id="lab-path">Lab path</h2>
+
+A good first lab sequence should build confidence without requiring perfect hardware access on day one.
+
+1. Inventory the machine: `ibv_devices`, `ibv_devinfo`, `rdma link`, and relevant kernel modules.
+2. If hardware is not available, create an RXE lab in a disposable environment.
+3. Run a known ping-pong example before writing your own.
+4. Modify the example to print every object creation and QP transition.
+5. Add meaningful `wr_id` values and print completion status for every completion.
+6. Add one RDMA write path and a small send notification.
+7. Only then compare with perftest so the numbers attach to concepts you have already traced.
+
+The next articles should deepen one layer at a time:
+
+1. InfiniBand addressing and subnet management.
+2. RoCEv2 GID indexes, PFC, ECN, and routing.
+3. A fully annotated `libibverbs` reliable-connected ping-pong.
+4. RDMA CM address resolution and connection events.
+5. perftest methodology for latency and bandwidth notebooks.
+
+</ArticleLayout>
