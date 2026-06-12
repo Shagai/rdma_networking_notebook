@@ -17,12 +17,24 @@ export type Experiment = {
 
 export type LearningProject = {
   order: number
+  slug: string
   title: string
   folder: string
   status: MilestoneStatus
   summary: string
   concepts: string[]
   nextStep: string
+}
+
+export type ProjectReport = {
+  title: string
+  status: MilestoneStatus
+  folder: string
+  summary: string
+  artifacts: string[]
+  flow: string[]
+  commands: { label: string; command: string }[]
+  nextChecks: string[]
 }
 
 export const milestones: Milestone[] = [
@@ -40,14 +52,14 @@ export const milestones: Milestone[] = [
   },
   {
     title: 'First project implementation',
-    status: 'active',
-    date: 'Next',
-    summary: 'Implement the RDMA ping-pong project from the new starter workspace, with object lifetime diagrams and command output notes.',
+    status: 'done',
+    date: '2026-06-12',
+    summary: 'Completed the RDMA ping-pong starter with verbs resource setup, TCP metadata exchange, payload validation, tests, and project notes.',
   },
   {
     title: 'RXE reproducible lab',
-    status: 'planned',
-    date: 'Planned',
+    status: 'active',
+    date: 'Next',
     summary: 'Document a safe Soft-RoCE setup for local learning without requiring physical RDMA hardware.',
   },
   {
@@ -61,15 +73,17 @@ export const milestones: Milestone[] = [
 export const learningProjects: LearningProject[] = [
   {
     order: 1,
+    slug: '01-rdma-pingpong',
     title: 'RDMA Ping-Pong',
     folder: 'projects/01-rdma-pingpong',
-    status: 'active',
-    summary: 'Build the first two-peer send/receive application and validate one request/response round trip.',
-    concepts: ['Device setup', 'Memory registration', 'Queue pair states', 'Completion polling'],
-    nextStep: 'Fill the starter with client and server command skeletons.',
+    status: 'done',
+    summary: 'Implemented the first two-peer RC send/receive application with a TCP control plane and validated payload round trip.',
+    concepts: ['libibverbs', 'RC queue pairs', 'TCP metadata exchange', 'Completion polling'],
+    nextStep: 'Run the same commands on RXE or physical RDMA devices and capture command output.',
   },
   {
     order: 2,
+    slug: '02-zero-copy-file-transfer',
     title: 'Zero-Copy File Transfer',
     folder: 'projects/02-zero-copy-file-transfer',
     status: 'planned',
@@ -79,6 +93,7 @@ export const learningProjects: LearningProject[] = [
   },
   {
     order: 3,
+    slug: '03-rdma-key-value-store',
     title: 'RDMA Key-Value Store',
     folder: 'projects/03-rdma-key-value-store',
     status: 'planned',
@@ -88,6 +103,7 @@ export const learningProjects: LearningProject[] = [
   },
   {
     order: 4,
+    slug: '04-throughput-latency-benchmark',
     title: 'Throughput And Latency Benchmark',
     folder: 'projects/04-throughput-latency-benchmark',
     status: 'planned',
@@ -97,6 +113,7 @@ export const learningProjects: LearningProject[] = [
   },
   {
     order: 5,
+    slug: '05-mini-rdma-runtime',
     title: 'Mini RDMA Runtime',
     folder: 'projects/05-mini-rdma-runtime',
     status: 'planned',
@@ -110,9 +127,9 @@ export const experiments: Experiment[] = [
   {
     title: 'Queue pair state trace',
     topic: 'libibverbs',
-    status: 'active',
-    artifact: 'Annotated sequence diagram and code snippets',
-    nextStep: 'Capture RESET to RTS transitions from a small RC example.',
+    status: 'done',
+    artifact: 'Implemented RESET to INIT to RTR to RTS transitions in Project 01',
+    nextStep: 'Turn the code path into a visual sequence once the RXE run is captured.',
   },
   {
     title: 'GID index inventory',
@@ -124,8 +141,56 @@ export const experiments: Experiment[] = [
   {
     title: 'RXE smoke test',
     topic: 'Soft-RoCE / RXE',
-    status: 'planned',
+    status: 'active',
     artifact: 'Runbook with cleanup steps',
-    nextStep: 'Create a disposable VM recipe and validate ibv_rc_pingpong.',
+    nextStep: 'Use Project 01 as the application-level smoke test after ibv_rc_pingpong.',
+  },
+]
+
+export const projectReports: ProjectReport[] = [
+  {
+    title: 'Project 01: RDMA Ping-Pong',
+    status: 'done',
+    folder: 'projects/01-rdma-pingpong',
+    summary:
+      'A one-shot reliable-connected verbs application: the server posts a receive, the client sends rdma-ping, the server validates it, and the client validates rdma-pong.',
+    artifacts: [
+      'Client and server binaries in starter/bin after make.',
+      'Shared endpoint parser and payload validator in starter/src/protocol.c.',
+      'Verbs setup, QP transitions, posting, polling, and cleanup in starter/src/common.c.',
+      'Hardware-independent parser tests in starter/tests/test_protocol.c.',
+    ],
+    flow: [
+      'Open device, query port, allocate protection domain, create CQs and one RC QP.',
+      'Register fixed send and receive buffers with local-write access.',
+      'Exchange LID, QPN, PSN, GID index, and GID over the TCP control channel.',
+      'Move both QPs through INIT, RTR, and RTS, then synchronize with READY.',
+      'Post receives before sends, poll completions, validate payloads, and clean up in reverse ownership order.',
+    ],
+    commands: [
+      {
+        label: 'Build',
+        command: 'make -C projects/01-rdma-pingpong/starter',
+      },
+      {
+        label: 'Tests',
+        command: 'make -C projects/01-rdma-pingpong/starter test',
+      },
+      {
+        label: 'Server',
+        command:
+          './projects/01-rdma-pingpong/starter/bin/rdma-pingpong-server --device <device> --ib-port 1 --tcp-port 7471 --debug',
+      },
+      {
+        label: 'Client',
+        command:
+          './projects/01-rdma-pingpong/starter/bin/rdma-pingpong-client --server <server-ip> --device <device> --ib-port 1 --tcp-port 7471 --debug',
+      },
+    ],
+    nextChecks: [
+      'Capture a full RXE run because the current local environment exposes no usable RDMA device list.',
+      'Add a multi-message mode only after the one-shot run is recorded.',
+      'Use the repeated setup code as input for Project 05, not as an abstraction inside Project 01.',
+    ],
   },
 ]

@@ -179,6 +179,10 @@ svg {
   font-weight: 700;
 }
 
+.project-card-link {
+  margin-top: 0;
+}
+
 .page {
   width: min(1180px, calc(100% - 40px));
   margin: 0 auto;
@@ -439,6 +443,262 @@ h3 {
   color: var(--code);
   font-family: var(--mono);
   font-size: 0.78rem;
+}
+
+.project-report-list {
+  display: grid;
+  gap: 16px;
+}
+
+.project-report {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-strong);
+  padding: 24px;
+  box-shadow: 0 1px 0 rgba(31, 41, 51, 0.04);
+}
+
+.project-report h3 {
+  margin-top: 12px;
+}
+
+.project-report > p {
+  max-width: 900px;
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+.project-report .card-topline code,
+.command-list code {
+  overflow-wrap: anywhere;
+  border-radius: 8px;
+  padding: 7px 9px;
+  background: var(--code-bg);
+  color: var(--code);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.command-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.command-list div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.command-list span {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.next-checks {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.next-checks strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.next-checks ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.next-checks li + li {
+  margin-top: 6px;
+}
+
+.project-doc-page {
+  width: min(1240px, calc(100% - 40px));
+}
+
+.project-doc-hero {
+  max-width: 920px;
+}
+
+.project-doc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 22px;
+}
+
+.project-doc-meta code {
+  border-radius: 8px;
+  padding: 5px 9px;
+  background: var(--code-bg);
+  color: var(--code);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+}
+
+.project-doc-hero .concept-list {
+  margin-top: 16px;
+}
+
+.project-doc-shell {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 840px);
+  gap: 46px;
+  align-items: start;
+}
+
+.project-doc-nav {
+  position: sticky;
+  top: 96px;
+  display: grid;
+  gap: 26px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.project-doc-nav .text-link {
+  margin-top: 0;
+}
+
+.project-doc-nav strong {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--ink);
+}
+
+.project-doc-nav nav {
+  display: grid;
+  gap: 8px;
+}
+
+.project-doc-nav a {
+  display: inline-flex;
+  gap: 8px;
+  align-items: baseline;
+  text-decoration: none;
+}
+
+.project-doc-nav a:hover,
+.project-doc-nav a.is-active {
+  color: var(--teal);
+}
+
+.project-doc-nav a span {
+  font-family: var(--mono);
+  font-size: 0.76rem;
+}
+
+.project-doc-main {
+  min-width: 0;
+}
+
+.project-doc-section {
+  scroll-margin-top: 96px;
+  border-top: 1px solid var(--line);
+  padding: 34px 0 44px;
+}
+
+.project-doc-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.project-doc-section-heading {
+  margin-bottom: 18px;
+}
+
+.project-doc-section-heading h2 {
+  margin-top: 4px;
+}
+
+.markdown-doc {
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: 1.05rem;
+}
+
+.markdown-doc h2,
+.markdown-doc h3,
+.markdown-doc h4,
+.markdown-doc h5,
+.markdown-doc h6 {
+  margin-top: 28px;
+}
+
+.markdown-doc h2:first-child,
+.markdown-doc h3:first-child {
+  margin-top: 0;
+}
+
+.markdown-doc p,
+.markdown-doc ol,
+.markdown-doc ul,
+.markdown-doc pre,
+.markdown-table-wrap {
+  margin-top: 16px;
+}
+
+.markdown-doc ol,
+.markdown-doc ul {
+  padding-left: 24px;
+}
+
+.markdown-doc li + li {
+  margin-top: 7px;
+}
+
+.markdown-doc code {
+  border-radius: 5px;
+  padding: 2px 5px;
+  background: var(--code-bg);
+  color: var(--code);
+  font-family: var(--mono);
+  font-size: 0.88em;
+}
+
+.markdown-doc pre {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--code-bg);
+}
+
+.markdown-doc pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown-table-wrap {
+  overflow-x: auto;
+}
+
+.markdown-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--sans);
+  font-size: 0.92rem;
+}
+
+.markdown-doc th,
+.markdown-doc td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-doc th {
+  color: var(--ink);
 }
 
 .project-number {

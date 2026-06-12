@@ -10,5 +10,5 @@ const inferredGitHubPagesBase =
 
 export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? inferredGitHubPagesBase,
-  plugins: [mdx(), react()],
+  plugins: [mdx({ include: /\.mdx$/ }), react()],
 })

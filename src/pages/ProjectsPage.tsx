@@ -1,4 +1,5 @@
-import { experiments, learningProjects, milestones } from '../data/projects'
+import { Link } from 'react-router-dom'
+import { experiments, learningProjects, milestones, projectReports } from '../data/projects'
 
 const statusLabels = {
   done: 'Done',
@@ -46,6 +47,70 @@ export default function ProjectsPage() {
               <p>
                 <strong>Next:</strong> {project.nextStep}
               </p>
+              <Link className="text-link project-card-link" to={`/projects/${project.slug}`}>
+                Open full documentation
+              </Link>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="reader-section">
+        <div className="section-heading">
+          <p className="eyebrow">Completed build</p>
+          <h2>Project implementation notes</h2>
+          <p>
+            The tracker records what the completed starter now teaches, which commands verify it, and which lab
+            evidence still needs to be captured on RDMA or RXE hardware.
+          </p>
+        </div>
+
+        <div className="project-report-list">
+          {projectReports.map((report) => (
+            <article className="project-report" key={report.folder}>
+              <div className="card-topline">
+                <code>{report.folder}</code>
+                <span className={`status-pill ${report.status}`}>{statusLabels[report.status]}</span>
+              </div>
+              <h3>{report.title}</h3>
+              <p>{report.summary}</p>
+
+              <div className="detail-columns">
+                <div>
+                  <strong>Artifacts</strong>
+                  <ul>
+                    {report.artifacts.map((artifact) => (
+                      <li key={artifact}>{artifact}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <strong>Data path</strong>
+                  <ul>
+                    {report.flow.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="command-list">
+                {report.commands.map((command) => (
+                  <div key={command.label}>
+                    <span>{command.label}</span>
+                    <code>{command.command}</code>
+                  </div>
+                ))}
+              </div>
+
+              <div className="next-checks">
+                <strong>Next checks</strong>
+                <ul>
+                  {report.nextChecks.map((check) => (
+                    <li key={check}>{check}</li>
+                  ))}
+                </ul>
+              </div>
             </article>
           ))}
         </div>

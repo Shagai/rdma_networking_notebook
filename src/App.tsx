@@ -3,6 +3,7 @@ import RdmaFundamentals from './articles/rdma-fundamentals.mdx'
 import Layout from './components/Layout'
 import ArticlesPage from './pages/ArticlesPage'
 import HomePage from './pages/HomePage'
+import ProjectDetailPage from './pages/ProjectDetailPage'
 import ProjectsPage from './pages/ProjectsPage'
 import TopicsPage from './pages/TopicsPage'
 
@@ -13,6 +14,7 @@ export default function App() {
         <Route index element={<HomePage />} />
         <Route path="topics" element={<TopicsPage />} />
         <Route path="projects" element={<ProjectsPage />} />
+        <Route path="projects/:slug" element={<ProjectDetailPage />} />
         <Route path="articles" element={<ArticlesPage />} />
         <Route path="articles/rdma-fundamentals" element={<RdmaFundamentals />} />
         <Route path="*" element={<Navigate to="/" replace />} />

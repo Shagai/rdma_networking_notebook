@@ -17,6 +17,34 @@ npm install
 npm run dev
 ```
 
+The default dev server is only intended for the local machine. To view the site
+from another computer on the same local network, bind Vite to all interfaces:
+
+```bash
+npm run dev -- --host 0.0.0.0
+```
+
+Then open the URL from the other computer using this machine's LAN address:
+
+```text
+http://<this-machine-lan-ip>:5173/
+```
+
+For example, if this machine is `192.168.1.42`, open
+`http://192.168.1.42:5173/`. Because the app uses hash routing, direct routes
+also work through the hash path, such as `http://192.168.1.42:5173/#/projects`.
+
+For a production-like local-network check, build the static site and serve the
+preview server on the network:
+
+```bash
+npm run build
+npm run preview -- --host 0.0.0.0
+```
+
+If another computer cannot connect, confirm both machines are on the same
+network and that the firewall allows inbound connections to the Vite port.
+
 ## Verification
 
 ```bash
