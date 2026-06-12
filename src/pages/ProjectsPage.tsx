@@ -1,4 +1,4 @@
-import { experiments, milestones } from '../data/projects'
+import { experiments, learningProjects, milestones } from '../data/projects'
 
 const statusLabels = {
   done: 'Done',
@@ -11,11 +11,45 @@ export default function ProjectsPage() {
     <div className="page">
       <header className="page-header">
         <p className="eyebrow">Execution tracker</p>
-        <h1>Open-source project progress and experiments</h1>
+        <h1>Learning projects, progress, and experiments</h1>
         <p className="lede">
-          A lightweight local tracker for turning reading notes into labs, diagrams, benchmark runs, and public writeups.
+          A lightweight local tracker for turning reading notes into buildable RDMA projects, labs, diagrams,
+          benchmark runs, and public writeups.
         </p>
       </header>
+
+      <section className="reader-section">
+        <div className="section-heading">
+          <p className="eyebrow">Build path</p>
+          <h2>Projects to complete in order</h2>
+          <p>
+            Each project has a folder with a starter workspace, design notes, checkpoints, verification commands,
+            and an experiment notebook.
+          </p>
+        </div>
+
+        <div className="project-track">
+          {learningProjects.map((project) => (
+            <article className="project-card" key={project.folder}>
+              <div className="card-topline">
+                <span className="project-number">{String(project.order).padStart(2, '0')}</span>
+                <span className={`status-pill ${project.status}`}>{statusLabels[project.status]}</span>
+              </div>
+              <h3>{project.title}</h3>
+              <p>{project.summary}</p>
+              <code>{project.folder}</code>
+              <div className="concept-list" aria-label={`${project.title} concepts`}>
+                {project.concepts.map((concept) => (
+                  <span key={concept}>{concept}</span>
+                ))}
+              </div>
+              <p>
+                <strong>Next:</strong> {project.nextStep}
+              </p>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section className="reader-section split-section">
         <div>

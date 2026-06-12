@@ -298,6 +298,7 @@ h3 {
 .topic-card,
 .mini-card,
 .progress-panel,
+.project-card,
 .experiment-card,
 .timeline-item,
 .article-row {
@@ -310,6 +311,7 @@ h3 {
 .topic-card,
 .mini-card,
 .progress-panel,
+.project-card,
 .experiment-card,
 .timeline-item {
   padding: 20px;
@@ -322,6 +324,7 @@ h3 {
 .topic-card h3,
 .mini-card strong,
 .progress-panel h3,
+.project-card h3,
 .experiment-card h3,
 .timeline-item h3 {
   margin-top: 8px;
@@ -330,6 +333,7 @@ h3 {
 .topic-card p,
 .mini-card p,
 .progress-panel p,
+.project-card p,
 .experiment-card p,
 .timeline-item p {
   margin-top: 10px;
@@ -406,6 +410,58 @@ h3 {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+}
+
+.project-track {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.project-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.project-card h3,
+.project-card p {
+  margin-top: 0;
+}
+
+.project-card code {
+  display: block;
+  width: 100%;
+  overflow-wrap: anywhere;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--code-bg);
+  color: var(--code);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.project-number {
+  color: var(--teal);
+  font-family: var(--mono);
+  font-size: 1.4rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.concept-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.concept-list span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .detail-columns {
@@ -932,6 +988,7 @@ input[type='range'] {
   .topology-figure,
   .learning-path,
   .compact-grid,
+  .project-track,
   .topic-grid,
   .three-column,
   .control-grid {

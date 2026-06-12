@@ -29,6 +29,7 @@ npm run build
 - `src/articles/` contains MDX articles.
 - `src/data/topics.ts` stores the learning map.
 - `src/data/projects.ts` stores milestones and experiments.
+- `projects/` contains buildable learning projects, starter workspaces, checkpoints, verification notes, and experiment notebooks.
 - `src/components/InteractiveFigures.tsx` contains reusable interactive diagrams.
 
 The app uses `HashRouter` so the static build can be deployed later to GitHub Pages, Netlify, or Vercel without needing server-side route rewrites.
