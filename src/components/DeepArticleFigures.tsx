@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 type Operation = 'Send/Receive' | 'RDMA Write' | 'RDMA Read' | 'Atomic'
+type VerbsPhase = 'Discover' | 'Create objects' | 'Register memory' | 'Connect QP' | 'Move bytes' | 'Complete'
 
 const operations: Record<
   Operation,
@@ -71,6 +72,92 @@ const lifecycleSteps = [
   {
     name: 'Teardown',
     detail: 'Drain outstanding work, destroy QPs/CQs, deregister memory, and close the device context in dependency order.',
+  },
+] as const
+
+const verbsPhases: Record<
+  VerbsPhase,
+  {
+    purpose: string
+    calls: string[]
+    projectHook: string
+    trap: string
+  }
+> = {
+  Discover: {
+    purpose: 'Find the verbs device, open it, and read port addressing information before any queue can move traffic.',
+    calls: ['ibv_get_device_list', 'ibv_get_device_name', 'ibv_open_device', 'ibv_query_port', 'ibv_query_gid'],
+    projectHook: 'choose_device() and query_port_and_gid() fill ctx->verbs, ctx->port_attr, LID, and optional GID.',
+    trap: 'A port can exist but still be unusable if it is not IBV_PORT_ACTIVE or the wrong GID index is selected for RoCE.',
+  },
+  'Create objects': {
+    purpose: 'Build the ownership boundary and the queues that the application will post work into.',
+    calls: ['ibv_alloc_pd', 'ibv_create_cq', 'ibv_create_qp', 'ibv_modify_qp RESET->INIT'],
+    projectHook: 'create_qp() creates one RC queue pair and separate send/receive completion queues.',
+    trap: 'A QP cannot use memory from a different protection domain, even if the pointer and lkey look valid in software.',
+  },
+  'Register memory': {
+    purpose: 'Turn ordinary heap buffers into memory regions the RNIC may DMA to or from.',
+    calls: ['calloc', 'ibv_reg_mr'],
+    projectHook: 'register_buffers() registers send_buf and recv_buf with IBV_ACCESS_LOCAL_WRITE.',
+    trap: 'Even SEND/RECV needs local registration; the SGE lkey is checked when work is posted and executed.',
+  },
+  'Connect QP': {
+    purpose: 'Bind each RC queue pair to the remote QP number, packet sequence numbers, MTU, and path.',
+    calls: ['ibv_modify_qp INIT->RTR', 'ibv_modify_qp RTR->RTS'],
+    projectHook: 'pp_connect_qp() consumes endpoint metadata exchanged over the narrow TCP control channel.',
+    trap: 'A bad PSN, LID, GID, MTU, or path attribute often appears later as a timeout or failed completion.',
+  },
+  'Move bytes': {
+    purpose: 'Post receive buffers first, then post send work requests that the RNIC consumes asynchronously.',
+    calls: ['ibv_post_recv', 'ibv_post_send'],
+    projectHook: 'pp_post_recv() supplies the destination SGE; pp_post_send() posts IBV_WR_SEND with IBV_SEND_SIGNALED.',
+    trap: 'A SEND requires a posted receive on the peer. Without one, reliable connected transport can hit receiver-not-ready behavior.',
+  },
+  Complete: {
+    purpose: 'Poll completion queues, validate status, recover buffer ownership, and tear resources down in dependency order.',
+    calls: ['ibv_poll_cq', 'ibv_wc_status_str', 'ibv_destroy_qp', 'ibv_dereg_mr', 'ibv_destroy_cq', 'ibv_dealloc_pd'],
+    projectHook: 'pp_wait_completion() checks wr_id and status; pp_context_destroy() unwinds the verbs object graph.',
+    trap: 'A posted buffer is not yours again until the relevant completion or failure path says so.',
+  },
+}
+
+const verbsObjects = [
+  {
+    name: 'ibv_context',
+    project: 'ctx->verbs',
+    created: 'ibv_open_device',
+    role: 'Open handle to the RDMA device and provider.',
+  },
+  {
+    name: 'ibv_pd',
+    project: 'ctx->pd',
+    created: 'ibv_alloc_pd',
+    role: 'Protection boundary tying memory regions and QPs together.',
+  },
+  {
+    name: 'ibv_cq',
+    project: 'ctx->send_cq, ctx->recv_cq',
+    created: 'ibv_create_cq',
+    role: 'Queues where the provider reports completed work requests.',
+  },
+  {
+    name: 'ibv_qp',
+    project: 'ctx->qp',
+    created: 'ibv_create_qp',
+    role: 'Reliable-connected send and receive queues used by ping-pong.',
+  },
+  {
+    name: 'ibv_mr',
+    project: 'ctx->send_mr, ctx->recv_mr',
+    created: 'ibv_reg_mr',
+    role: 'Registered buffers plus lkey values for local DMA authorization.',
+  },
+  {
+    name: 'ibv_wc',
+    project: 'local variable in pp_wait_completion',
+    created: 'ibv_poll_cq output',
+    role: 'Completion status, wr_id, and byte count returned to software.',
   },
 ] as const
 
@@ -154,6 +241,74 @@ export function ObjectLifecycleFigure() {
         <p className="panel-kicker">Selected lifetime phase</p>
         <h3>{current.name}</h3>
         <p>{current.detail}</p>
+      </div>
+    </figure>
+  )
+}
+
+export function LibibverbsLifecycleFigure() {
+  const [selected, setSelected] = useState<VerbsPhase>('Register memory')
+  const phase = verbsPhases[selected]
+
+  return (
+    <figure className="interactive-figure verbs-figure">
+      <figcaption>
+        <strong>libibverbs call path in this project</strong>
+        <span>Choose a phase to see which verbs calls the ping-pong starter uses and what each phase proves.</span>
+      </figcaption>
+      <div className="verbs-phase-grid" role="group" aria-label="Choose libibverbs phase">
+        {(Object.keys(verbsPhases) as VerbsPhase[]).map((name) => (
+          <button
+            key={name}
+            type="button"
+            className={selected === name ? 'verbs-phase-button is-selected' : 'verbs-phase-button'}
+            onClick={() => setSelected(name)}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+      <div className="figure-panel verbs-phase-panel">
+        <p className="panel-kicker">{selected}</p>
+        <h3>{phase.purpose}</h3>
+        <ul className="verbs-call-list">
+          {phase.calls.map((call) => (
+            <li key={call}>
+              <code>{call}</code>
+            </li>
+          ))}
+        </ul>
+        <dl className="operation-facts verbs-phase-facts">
+          <div>
+            <dt>Where it appears</dt>
+            <dd>{phase.projectHook}</dd>
+          </div>
+          <div>
+            <dt>Common trap</dt>
+            <dd>{phase.trap}</dd>
+          </div>
+        </dl>
+      </div>
+    </figure>
+  )
+}
+
+export function LibibverbsObjectMapFigure() {
+  return (
+    <figure className="interactive-figure verbs-object-figure">
+      <figcaption>
+        <strong>Objects in the ping-pong context</strong>
+        <span>The starter keeps the verbs object graph visible inside struct pp_context.</span>
+      </figcaption>
+      <div className="verbs-object-grid">
+        {verbsObjects.map((object) => (
+          <article className="verbs-object-card" key={object.name}>
+            <span>{object.created}</span>
+            <h3>{object.name}</h3>
+            <code>{object.project}</code>
+            <p>{object.role}</p>
+          </article>
+        ))}
       </div>
     </figure>
   )

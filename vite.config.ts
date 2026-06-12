@@ -1,5 +1,6 @@
 import mdx from '@mdx-js/rollup'
 import react from '@vitejs/plugin-react'
+import remarkGfm from 'remark-gfm'
 import { defineConfig } from 'vite'
 
 const repositoryName = process.env.GITHUB_REPOSITORY?.split('/')[1]
@@ -10,5 +11,5 @@ const inferredGitHubPagesBase =
 
 export default defineConfig({
   base: process.env.VITE_BASE_PATH ?? inferredGitHubPagesBase,
-  plugins: [mdx({ include: /\.mdx$/ }), react()],
+  plugins: [mdx({ include: /\.mdx$/, remarkPlugins: [remarkGfm] }), react()],
 })

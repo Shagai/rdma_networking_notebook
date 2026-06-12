@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
+import LibibverbsInfinibandLibrary from './articles/libibverbs-infiniband-library.mdx'
 import RdmaFundamentals from './articles/rdma-fundamentals.mdx'
 import Layout from './components/Layout'
 import ArticlesPage from './pages/ArticlesPage'
@@ -17,6 +18,7 @@ export default function App() {
         <Route path="projects/:slug" element={<ProjectDetailPage />} />
         <Route path="articles" element={<ArticlesPage />} />
         <Route path="articles/rdma-fundamentals" element={<RdmaFundamentals />} />
+        <Route path="articles/libibverbs-infiniband-library" element={<LibibverbsInfinibandLibrary />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

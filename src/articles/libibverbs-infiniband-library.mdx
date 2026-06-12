@@ -1,0 +1,375 @@
+import ArticleLayout from '../components/ArticleLayout'
+import { Callout, Sidenote, Term } from '../components/MdxComponents'
+import { LibibverbsLifecycleFigure, LibibverbsObjectMapFigure } from '../components/DeepArticleFigures'
+
+<ArticleLayout
+  kicker="Programming"
+  title="libibverbs: the InfiniBand verbs library we use"
+  subtitle="A code-grounded guide to the low-level RDMA library behind the ping-pong project: devices, protection domains, memory regions, queue pairs, work requests, completions, and why TCP is only the control plane."
+  updated="2026-06-12"
+  readingTime="26 min"
+  toc={[
+    { href: '#what-library', label: 'What library?' },
+    { href: '#where-used', label: 'Where we use it' },
+    { href: '#stack-model', label: 'Stack model' },
+    { href: '#object-map', label: 'Object map' },
+    { href: '#setup-walkthrough', label: 'Setup walkthrough' },
+    { href: '#connection-model', label: 'Connection model' },
+    { href: '#send-receive-path', label: 'SEND/RECV path' },
+    { href: '#completions-errors', label: 'Completions and errors' },
+    { href: '#extend-next', label: 'How to extend it' },
+    { href: '#learning-checklist', label: 'Learning checklist' },
+  ]}
+>
+
+<h2 id="what-library">What library?</h2>
+
+The "InfiniBand library" in this project is <Term>libibverbs</Term>, included through:
+
+```c
+#include <infiniband/verbs.h>
+```
+
+The name is historical and a little misleading. `libibverbs` exposes the user-space verbs API for RDMA devices. The same programming model can drive native InfiniBand, RoCE/RoCEv2 on Ethernet, and software RXE devices, as long as the kernel and provider stack expose a verbs device.
+
+Our first project links it in `projects/01-rdma-pingpong/starter/Makefile`:
+
+```make
+VERBS_CFLAGS := $(shell $(PKG_CONFIG) --cflags libibverbs 2>/dev/null)
+VERBS_LIBS := $(shell $(PKG_CONFIG) --libs libibverbs 2>/dev/null || printf '%s' '-libverbs')
+```
+
+At runtime, `libibverbs` is not a message library like MPI, UCX, or libfabric. It is the low-level interface that gives an application direct control over RDMA objects: device contexts, protection domains, memory regions, completion queues, queue pairs, work requests, and completion records.
+
+<Callout title="Short definition">
+`libibverbs` is the C library that lets this project create RDMA resources and post work directly to a verbs provider. It gives us control, but it also makes object lifetime and protocol ordering our responsibility.
+</Callout>
+
+<Sidenote>
+Higher-level stacks often sit above verbs. UCX, MPI transports, NCCL network paths, storage stacks, and custom runtimes may use verbs internally while hiding much of this setup from application code.
+</Sidenote>
+
+The useful mental split is:
+
+<div className="learning-goals">
+  <div>
+    <strong>Library</strong>
+    <p>`libibverbs` provides the API and provider dispatch layer used from C code.</p>
+  </div>
+  <div>
+    <strong>Device</strong>
+    <p>The RNIC, HCA, or RXE software device executes the queue work.</p>
+  </div>
+  <div>
+    <strong>Fabric</strong>
+    <p>InfiniBand, RoCE, or RXE decides what addressing, routing, and operational details matter.</p>
+  </div>
+</div>
+
+<h2 id="where-used">Where we use it</h2>
+
+The current code keeps verbs visible on purpose. It is a teaching implementation, not a wrapper that hides RDMA behind a friendly runtime.
+
+| File | Role |
+| --- | --- |
+| `projects/01-rdma-pingpong/starter/src/common.h` | Includes `<infiniband/verbs.h>` and stores the verbs object graph in `struct pp_context`. |
+| `projects/01-rdma-pingpong/starter/src/common.c` | Chooses the RDMA device, creates resources, registers buffers, connects the QP, posts work, polls completions, and cleans up. |
+| `projects/01-rdma-pingpong/starter/src/server.c` | Uses the common verbs helpers to post a receive, wait for a request, and send a response. |
+| `projects/01-rdma-pingpong/starter/src/client.c` | Uses the common verbs helpers to post a receive, send the request, and wait for the response. |
+| `projects/01-rdma-pingpong/starter/Makefile` | Discovers compiler/linker flags with `pkg-config libibverbs` and links the client/server against the library. |
+
+The starter is intentionally narrow:
+
+1. It uses reliable connected queue pairs: `IBV_QPT_RC`.
+2. It uses two-sided operations: `IBV_WR_SEND` plus posted receives.
+3. It exchanges connection metadata over a simple TCP socket.
+4. It does not use RDMA CM yet.
+5. It does not use one-sided RDMA read/write yet.
+
+That narrow scope is the right first slice. It forces the learner to see the verbs object lifecycle without also learning remote keys, remote addresses, atomics, event channels, or connection-manager events at the same time.
+
+<h2 id="stack-model">Stack model</h2>
+
+In the ping-pong project, TCP and RDMA have different jobs. TCP is a temporary control channel. It exchanges endpoint metadata and a `READY` marker. The payload itself moves through verbs work requests.
+
+<div className="verbs-stack">
+  <div className="verbs-stack-step">
+    <strong>Application</strong>
+    <span>`client.c`, `server.c`, and `common.c` decide protocol ordering.</span>
+  </div>
+  <div className="verbs-stack-step">
+    <strong>libibverbs</strong>
+    <span>The C API creates resources and posts work requests to a provider.</span>
+  </div>
+  <div className="verbs-stack-step">
+    <strong>Provider and kernel support</strong>
+    <span>The provider knows how to talk to the selected RDMA device.</span>
+  </div>
+  <div className="verbs-stack-step">
+    <strong>RNIC or RXE</strong>
+    <span>The device consumes queue entries, performs DMA, and produces completions.</span>
+  </div>
+  <div className="verbs-stack-step">
+    <strong>Fabric</strong>
+    <span>InfiniBand uses LID/path concepts; RoCE uses Ethernet/IP and GIDs.</span>
+  </div>
+</div>
+
+The important lesson is that verbs is not the network protocol by itself. It is the programming interface. The selected device and link layer determine whether the same calls are operating over native InfiniBand, RoCE, or RXE.
+
+<Callout title="Why the code checks the link layer">
+`common.c` calls `ibv_query_port` and checks `port_attr.link_layer` because InfiniBand and RoCE need different path details. InfiniBand can use LID-only paths; RoCE normally needs a GID index and global route header information.
+</Callout>
+
+<h2 id="object-map">Object map</h2>
+
+Most of the learning value is in `struct pp_context`. It is a compact list of the objects you must understand before RDMA feels predictable:
+
+```c
+struct pp_context {
+    struct ibv_context *verbs;
+    struct ibv_pd *pd;
+    struct ibv_cq *send_cq;
+    struct ibv_cq *recv_cq;
+    struct ibv_qp *qp;
+    struct ibv_mr *send_mr;
+    struct ibv_mr *recv_mr;
+    char *send_buf;
+    char *recv_buf;
+    struct ibv_port_attr port_attr;
+    struct pp_endpoint local;
+};
+```
+
+<LibibverbsObjectMapFigure />
+
+Read the objects as a dependency graph:
+
+1. `ibv_context` opens a real verbs device.
+2. `ibv_pd` defines which queues and memory regions can work together.
+3. `ibv_cq` receives completion reports.
+4. `ibv_qp` owns the send queue and receive queue.
+5. `ibv_mr` gives the RNIC permission to access application buffers.
+6. `ibv_wc` tells software what finished, whether it succeeded, and which `wr_id` completed.
+
+The project destroys those objects in reverse construction order. That is not just tidiness. The queue pair may still reference memory regions and completion queues, so the QP is destroyed before memory deregistration and CQ destruction.
+
+<h2 id="setup-walkthrough">Setup walkthrough</h2>
+
+The setup path is verbose because verbs makes implicit socket behavior explicit. A socket can hide buffer ownership, routing, queueing, and completion state behind the kernel. Verbs asks us to build the object graph and prove every dependency.
+
+<LibibverbsLifecycleFigure />
+
+The starter setup can be read as six questions:
+
+| Question | Code path | Why it matters |
+| --- | --- | --- |
+| Which RDMA device? | `ibv_get_device_list`, `ibv_open_device` | Selects the provider and adapter. |
+| Which port and address? | `ibv_query_port`, `ibv_query_gid` | Gets LID/GID data needed by the connection path. |
+| Which trust boundary? | `ibv_alloc_pd` | Ensures QPs and memory regions are in the same protection domain. |
+| Where do completions land? | `ibv_create_cq` | Gives software a polling target for completed work. |
+| Where is work posted? | `ibv_create_qp` | Creates the send and receive queues. |
+| Which buffers can DMA? | `ibv_reg_mr` | Produces lkeys used by scatter-gather entries. |
+
+The memory registration section is worth slowing down on. The code allocates ordinary heap memory with `calloc`, then registers those buffers:
+
+```c
+ctx->send_mr = ibv_reg_mr(ctx->pd, ctx->send_buf, PP_MAX_PAYLOAD, IBV_ACCESS_LOCAL_WRITE);
+ctx->recv_mr = ibv_reg_mr(ctx->pd, ctx->recv_buf, PP_MAX_PAYLOAD, IBV_ACCESS_LOCAL_WRITE);
+```
+
+This project only needs local access flags because it uses SEND/RECV. A later one-sided write/read example would need remote access flags and would have to share remote address plus `rkey` with the peer.
+
+<h2 id="connection-model">Connection model</h2>
+
+Reliable connected queue pairs do not become usable just because they were created. Each side must move its QP through a state machine:
+
+1. `RESET` is the initial state.
+2. `INIT` binds the QP to a port and sets access flags.
+3. `RTR` means ready to receive from a specific remote QP and path.
+4. `RTS` means ready to send.
+
+The project does this with `ibv_modify_qp`:
+
+```c
+init_attr.qp_state = IBV_QPS_INIT;
+ibv_modify_qp(ctx->qp, &init_attr, init_flags);
+
+rtr.qp_state = IBV_QPS_RTR;
+rtr.dest_qp_num = remote->qpn;
+rtr.rq_psn = remote->psn;
+ibv_modify_qp(ctx->qp, &rtr, rtr_flags);
+
+rts.qp_state = IBV_QPS_RTS;
+rts.sq_psn = ctx->local.psn;
+ibv_modify_qp(ctx->qp, &rts, rts_flags);
+```
+
+Because the starter does not use RDMA CM, it exchanges the minimum endpoint metadata over TCP:
+
+```text
+LID=0023 QPN=003456 PSN=abcdef GID_INDEX=3 GID=000102030405060708090a0b0c0d0e0f
+```
+
+Each field answers a connection question:
+
+| Field | Meaning |
+| --- | --- |
+| `LID` | Local identifier used by native InfiniBand paths. |
+| `QPN` | Queue pair number; the remote QP that packets target. |
+| `PSN` | Packet sequence number seed for reliable connected ordering. |
+| `GID_INDEX` | Selected GID table index, important for RoCE and some global routes. |
+| `GID` | Global identifier used when a global route header is needed. |
+
+<Callout title="Why there is TCP in an RDMA example">
+The TCP socket is not the data path. It is just a convenient bootstrap channel for metadata that RDMA needs before the QPs can communicate.
+</Callout>
+
+<h2 id="send-receive-path">SEND/RECV path</h2>
+
+The ping-pong uses two-sided operations. The receiver must post a destination buffer before the sender posts the SEND. In this project, that rule is deliberately visible:
+
+1. Server initializes RDMA resources.
+2. Client initializes RDMA resources.
+3. The peers exchange endpoint metadata over TCP.
+4. Both QPs move to RTS.
+5. The server posts a receive.
+6. The server sends `READY` over TCP.
+7. The client posts its response receive.
+8. The client posts a SEND containing `rdma-ping`.
+9. The server polls receive completion, validates the request, then posts a SEND containing `rdma-pong`.
+10. The client polls receive completion and validates the response.
+
+The receive side uses an SGE that names the registered receive buffer and its `lkey`:
+
+```c
+struct ibv_sge sge = {
+    .addr = (uintptr_t)ctx->recv_buf,
+    .length = PP_MAX_PAYLOAD,
+    .lkey = ctx->recv_mr->lkey,
+};
+
+struct ibv_recv_wr wr = {
+    .wr_id = PP_WR_RECV,
+    .sg_list = &sge,
+    .num_sge = 1,
+};
+
+ibv_post_recv(ctx->qp, &wr, &bad_wr);
+```
+
+The send side also uses an SGE, but the work request opcode is `IBV_WR_SEND`:
+
+```c
+struct ibv_send_wr wr = {
+    .wr_id = PP_WR_SEND,
+    .opcode = IBV_WR_SEND,
+    .sg_list = &sge,
+    .num_sge = 1,
+    .send_flags = IBV_SEND_SIGNALED,
+};
+
+ibv_post_send(ctx->qp, &wr, &bad_wr);
+```
+
+No remote address or `rkey` appears in this SEND path. The receiver already posted a receive work request, and the transport places bytes into that posted receive buffer.
+
+<Sidenote>
+`wr_id` is an application-owned tag. The provider returns it in the completion so the program can map "a completion happened" back to "this was my send" or "this was my receive buffer."
+</Sidenote>
+
+<h2 id="completions-errors">Completions and errors</h2>
+
+Verbs calls are asynchronous once work is posted. `ibv_post_send` returning success does not mean the remote application has consumed the message. It means the work request was accepted onto the queue.
+
+The project uses busy polling for the first teaching example:
+
+```c
+int polled = ibv_poll_cq(cq, 1, &wc);
+if (wc.status != IBV_WC_SUCCESS) {
+    fprintf(stderr, "%s completion failed: %s\n", label, ibv_wc_status_str(wc.status));
+}
+if (wc.wr_id != expected_wr_id) {
+    fprintf(stderr, "%s completion had unexpected wr_id\n", label);
+}
+```
+
+This loop teaches three habits:
+
+1. Always inspect completion status, not only the return value from `ibv_poll_cq`.
+2. Use `wr_id` to recover which logical operation completed.
+3. Treat completion as the moment the application can safely advance ownership, not as a generic business event.
+
+Common failure modes in this project map cleanly to setup phases:
+
+| Symptom | Likely area |
+| --- | --- |
+| `no RDMA devices found` | No hardware verbs device or RXE device is configured. |
+| `RDMA port is not active` | Link, port, subnet manager, or RXE setup is not ready. |
+| `ibv_query_gid` fails | GID index does not exist for the selected port. |
+| `ibv_reg_mr` fails | Memory registration failed; check provider support, limits, and permissions. |
+| `QP transition INIT->RTR failed` | Remote QPN, PSN, LID/GID, MTU, or address attributes are wrong. |
+| Completion timeout | Peer did not post the matching work, path is wrong, or QP state/transport failed. |
+| Completion status is not success | Poll the exact status string first; it usually points closer to the violated invariant than the timeout does. |
+
+The useful debug commands before running the starter are:
+
+```sh
+ibv_devices
+ibv_devinfo
+rdma link
+```
+
+For RoCE, also inspect GID choices before assuming index `0` is correct:
+
+```sh
+show_gids
+```
+
+<h2 id="extend-next">How to extend it</h2>
+
+The current project uses SEND/RECV because it is the easiest way to learn queue ownership. The next verbs step is usually one-sided RDMA write or read.
+
+To add RDMA write, the design must grow in four places:
+
+1. Register a remote-write-capable memory region on the target side with `IBV_ACCESS_REMOTE_WRITE`.
+2. Exchange remote buffer address and `rkey` over the control channel.
+3. Post `IBV_WR_RDMA_WRITE` on the initiator with `wr.rdma.remote_addr` and `wr.rdma.rkey`.
+4. Add a notification mechanism, because a one-sided write does not consume a remote receive and may not wake the remote application by itself.
+
+The work request shape changes from:
+
+```c
+wr.opcode = IBV_WR_SEND;
+```
+
+to something closer to:
+
+```c
+wr.opcode = IBV_WR_RDMA_WRITE;
+wr.wr.rdma.remote_addr = remote_addr;
+wr.wr.rdma.rkey = remote_rkey;
+```
+
+That small code difference hides a large protocol difference. SEND/RECV says "the receiver gave me a buffer for this message." RDMA WRITE says "the receiver previously gave me permission to write this memory range, and I am choosing when to update it."
+
+<Callout title="Protocol rule">
+The verbs library moves bytes and reports completions. It does not design your application protocol. You still decide buffer ownership, notification, ordering, and when a peer may reuse or revoke an rkey.
+</Callout>
+
+<h2 id="learning-checklist">Learning checklist</h2>
+
+Use this page while reading `projects/01-rdma-pingpong/starter/src/common.c`. The goal is to be able to point at each call and explain which invariant it establishes.
+
+1. I can explain why `libibverbs` is used for InfiniBand, RoCE, and RXE even though the include path says `infiniband`.
+2. I can describe why TCP appears in the starter but does not carry the data payload.
+3. I can map `ibv_context`, `ibv_pd`, `ibv_cq`, `ibv_qp`, `ibv_mr`, `ibv_sge`, `ibv_send_wr`, `ibv_recv_wr`, and `ibv_wc` to the code.
+4. I can explain why memory registration is required before posting SEND/RECV work.
+5. I can recite the RC QP state progression: RESET, INIT, RTR, RTS.
+6. I can explain why the server posts a receive before sending `READY`.
+7. I can explain what `wr_id`, `lkey`, `QPN`, `PSN`, `LID`, `GID`, and `GID_INDEX` do.
+8. I can tell the difference between a posted work request and a completed work request.
+9. I can name the extra metadata needed to move from SEND/RECV to RDMA WRITE.
+10. I can debug a failed run by locating the phase that produced the first violated invariant.
+
+</ArticleLayout>
