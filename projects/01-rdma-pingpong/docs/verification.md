@@ -113,3 +113,19 @@ Failed to get IB devices list: Function not implemented
 
 Use an RDMA-capable host or a configured RXE interface to complete the
 end-to-end data movement check.
+
+## QEMU RXE Lab
+
+The repository includes a two-node QEMU/RXE harness for this check:
+
+```sh
+scripts/qemu/launch-lab.sh --sync --smoke
+scripts/qemu/labs/project-01-pingpong.sh
+```
+
+Expected result:
+
+- `launch-lab.sh --sync --smoke` starts both guests, configures `rxe0`, and
+  proves verbs/RDMA CM reachability.
+- `project-01-pingpong.sh` builds the starter on both nodes and completes the
+  custom send/receive round trip from node-b to node-a.

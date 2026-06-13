@@ -52,6 +52,22 @@ npm run lint
 npm run build
 ```
 
+## QEMU RXE lab
+
+The repository includes a modest two-node QEMU lab for running the early RDMA
+projects without physical RDMA devices. It provisions RXE devices over a
+private VM link and can run `rping`, `ibv_rc_pingpong`, `ib_write_bw`, and the
+first custom ping-pong project.
+
+Start here:
+
+```bash
+scripts/qemu/launch-lab.sh --sync --smoke
+scripts/qemu/labs/project-01-pingpong.sh
+```
+
+See `scripts/qemu/README.md` for host prerequisites, topology, and limits.
+
 ## Content structure
 
 - `src/articles/` contains MDX articles.

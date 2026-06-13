@@ -53,6 +53,14 @@ make -C projects/01-rdma-pingpong/starter
 Hardware or RXE verification requires two peers with active verbs devices. See
 `docs/verification.md` for the exact server/client commands.
 
+The repository QEMU/RXE lab can provide those two peers on a machine without
+physical RDMA devices:
+
+```sh
+scripts/qemu/launch-lab.sh --sync --smoke
+scripts/qemu/labs/project-01-pingpong.sh
+```
+
 ## Stretch Goals
 
 - Send multiple messages in sequence.

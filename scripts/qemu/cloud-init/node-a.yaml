@@ -1,0 +1,6 @@
+# node-a
+hostname: node-a
+lab_ip: 192.168.100.11
+mgmt_mac: 52:54:00:10:00:11
+rdma_mac: 52:54:00:20:00:11
+ssh_port: 2221

@@ -29,6 +29,13 @@ Each project has the same shape:
 Start from `starter/`, complete the checkpoints in order, and keep the
 verification notes updated as the implementation becomes more complete.
 
+## Local Two-Node Lab
+
+Use `scripts/qemu/` when a project needs two RDMA peers but the host machine
+does not have physical RDMA devices. The modest baseline provisions two QEMU
+guests with RXE devices and includes smoke tests for verbs, RDMA CM, perftest,
+and `01-rdma-pingpong`.
+
 ## Project Template
 
 Use `_template/` when adding another project. Copy it into a numbered folder,

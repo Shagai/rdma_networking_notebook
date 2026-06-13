@@ -1,0 +1,98 @@
+#cloud-config
+
+package_update: true
+packages:
+  - build-essential
+  - git
+  - ibverbs-utils
+  - iproute2
+  - libibverbs-dev
+  - librdmacm-dev
+  - make
+  - net-tools
+  - openssh-server
+  - perftest
+  - pkg-config
+  - rdma-core
+  - rdmacm-utils
+  - rsync
+
+ssh_authorized_keys:
+  - __SSH_AUTHORIZED_KEY__
+
+users:
+  - default
+
+write_files:
+  - path: /etc/hosts
+    append: true
+    content: |
+      192.168.100.11 node-a
+      192.168.100.12 node-b
+  - path: /etc/modules-load.d/rdma-rxe.conf
+    permissions: "0644"
+    content: |
+      ib_uverbs
+      rdma_ucm
+      rdma_rxe
+  - path: /usr/local/sbin/setup-rxe.sh
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+
+      NETDEV="${RDMA_NETDEV:-rdmanet0}"
+      RXE_DEV="${RDMA_DEVICE:-rxe0}"
+
+      for attempt in $(seq 1 30); do
+        if ip link show "$NETDEV" >/dev/null 2>&1; then
+          break
+        fi
+        sleep 2
+      done
+
+      if ! ip link show "$NETDEV" >/dev/null 2>&1; then
+        echo "missing private RDMA lab interface: $NETDEV" >&2
+        exit 1
+      fi
+
+      ip link set "$NETDEV" up
+
+      modprobe ib_uverbs || true
+      modprobe rdma_ucm || true
+      if ! modprobe rdma_rxe; then
+        apt-get update
+        apt-get install -y "linux-modules-extra-$(uname -r)" || true
+        modprobe rdma_rxe
+      fi
+
+      if ! rdma link show | grep -q "^link ${RXE_DEV}/"; then
+        rdma link add "$RXE_DEV" type rxe netdev "$NETDEV" || true
+      fi
+
+      rdma link show
+      ibv_devices
+  - path: /etc/systemd/system/rxe-setup.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Configure RXE for the RDMA QEMU lab
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      Environment=RDMA_NETDEV=rdmanet0
+      Environment=RDMA_DEVICE=rxe0
+      ExecStart=/usr/local/sbin/setup-rxe.sh
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - [systemctl, enable, --now, ssh.service]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, rxe-setup.service]
+
+final_message: "RDMA RXE lab node is ready after $UPTIME seconds."

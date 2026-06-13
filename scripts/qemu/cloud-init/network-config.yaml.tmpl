@@ -1,0 +1,16 @@
+version: 2
+ethernets:
+  mgmt0:
+    match:
+      macaddress: "__MGMT_MAC__"
+    set-name: mgmt0
+    dhcp4: true
+    optional: true
+  rdma0:
+    match:
+      macaddress: "__RDMA_MAC__"
+    set-name: rdmanet0
+    dhcp4: false
+    addresses:
+      - __LAB_IP__/24
+    optional: true
